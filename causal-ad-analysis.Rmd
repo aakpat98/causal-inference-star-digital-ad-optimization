@@ -1,0 +1,241 @@
+---
+title: "Evaluating Cost-Effective Ad Placement for Star Digital"
+output:
+  pdf_document: default
+  html_document: default
+fontsize: 12pt
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(readxl)
+```
+
+# Executive Summary
+
+This report evaluates the effectiveness of **Star Digital's online display advertising**. The primary objectives are to: 1. **Assess whether online advertising increases purchases**. 2. **Determine if ad frequency impacts conversion rates**. 3. **Identify which sites Star Digital should prioritize for advertising**.
+
+Our analysis uses experimental data, statistical tests, and regression models to provide **data-driven recommendations** for optimizing advertising spend.
+
+## Data Preparation
+
+```{r p11}
+data <- read_excel("M347SS-XLS-ENG.xls")
+data = data %>% mutate(total_imp = imp_1 +imp_2 +imp_3 +imp_4 +imp_5 +imp_6)
+```
+
+## Is Online Advertising Effective?
+
+### Checking Balance Between Control and Treatment Groups:
+
+The experiment was **randomized by design**, meaning users were assigned to either the test or control group at the moment of ad serving. This should theoretically ensure that both groups are **statistically similar**.
+
+To validate this, we conducted a **t-test on total impressions*:
+
+```{r p2}
+t.test(total_imp ~ test, data = data)
+```
+
+Findings: The p-value (0.8987) indicates no significant difference in impressions between the test and control groups. This confirms that randomization was successful.
+
+To ensure that our experiment has enough observations to detect a statistically significant effect, we conduct a **power test**:
+
+```{r p4}
+n_control <- sum(data$test == 0)
+n_treatment <- sum(data$test == 1)
+
+power_result <- power.t.test(delta = 0.2*0.5, 
+                             sd = 1, 
+                             sig.level = 0.05,
+                             power = 0.8,
+                             type = "two.sample", 
+                             alternative = "two.sided")
+
+power_result
+
+n_control
+n_treatment
+```
+- The computed sample size requirement was 1,570 per group, far below our actual sample sizes (2,656 in control and 22,647 in treatment).
+- This indicates that our study is overpowered, meaning that if a real effect of advertising exists, we have sufficient data to detect it.
+- Since our sample size greatly exceeds the required threshold, the results from our logistic regression models are statistically reliable.
+
+### Potential Assumptions and Limitations
+
+While the experiment follows a standard A/B test framework, one potential concern is the **Stable Unit Treatment Value Assumption (SUTVA)**. This assumption requires that a user’s purchase decision is influenced only by their own ad exposure, without spillover effects from other users.
+
+In this experiment, potential violations of SUTVA include:
+- **Cross-device behavior:** If users see ads on one device but convert on another where tracking does not apply.
+- **Spillover effects:** If test group users influence control group users via word-of-mouth or organic brand awareness.
+- **Heterogeneous treatment effects:** Some users might be more influenced by ads based on prior exposure to similar brands.
+
+While these effects are difficult to quantify, they should be kept in mind when interpreting the results. Future experiments could mitigate these risks by tracking cross-device behavior or segmenting users based on prior ad exposure.
+
+
+### Effect of Advertising on Purchases
+
+A logistic regression is used to check whether being in the test group (advertised) increases the probability of purchase:
+
+```{r p3}
+summary(glm(purchase ~ test, data = data, family = binomial))
+```
+
+Results:
+
+-   The coefficient for test (0.07676, p = 0.0614) suggests a positive but marginally insignificant effect of advertising on purchases.
+-   This means advertising has some effect, but not strongly statistically significant.
+
+### Interaction with Ad Frequency
+
+We check if ad exposure (total impressions) influences purchase probability:
+
+```{r p5}
+summary(glm(purchase ~ test * total_imp, data = data, family = binomial))
+```
+
+Findings:
+
+-   The coefficient for total_imp is positive and highly significant (p \< 3.32e-08), confirming that more ad impressions increase the probability of purchase.
+-   The interaction term (test:total_imp) is also significant (p \< 1.42e-06), suggesting that the effect of being in the test (advertised) group strengthens as ad impressions increase.
+
+## Does Ad Frequency Affect Purchases?
+
+A logistic regression tests whether more impressions lead to more conversions:
+
+```{r p6}
+summary(glm(purchase ~ total_imp, data = data, family = binomial))
+
+```
+
+Findings:
+
+-   The coefficient for total_imp (0.029201, p \< 2e-16) confirms ad frequency positively impacts purchases.
+
+### Diminishing Returns Analysis
+
+We include a quadratic term to check if excessive ads reduce effectiveness:
+
+```{r p7}
+logit_quad <- glm(purchase ~ total_imp + I(total_imp^2), data = data, family = binomial)
+summary(logit_quad)
+```
+
+Findings:
+
+-   The negative quadratic term (-1.158e-04, p \< 2e-16) confirms diminishing returns.
+-   There is an optimal number of impressions before ad effectiveness declines.
+
+## Which Sites Should Star Digital Advertise On?
+
+### Conversion Rate by Sites:
+
+```{r p78}
+site_conversion <- data %>%
+  summarise(
+    conv_1_5 = mean(purchase[(imp_1 + imp_2 + imp_3 + imp_4 + imp_5) > 0], na.rm = TRUE),
+    conv_6 = mean(purchase[imp_6 > 0], na.rm = TRUE)
+  )
+
+print(site_conversion)
+```
+
+Findings:
+
+-   Sites 1-5 have a higher conversion rate (56%).
+-   Site 6 has a conversion rate of 46%.
+
+## How effective are Sites 1-5 compared to Site 6 ?
+
+To compare whether advertising on Sites 1-5 collectively outperforms Site 6, 
+we create an aggregated impression variable:
+
+```{r p9}
+
+data <- data %>%
+  mutate(total_imp_1_5 = imp_1 + imp_2 + imp_3 + imp_4 + imp_5)
+
+# Logistic regression for Sites 1-5 vs. Site 6
+logit_sites <- glm(purchase ~ total_imp_1_5 + imp_6, data = data, family = binomial)
+
+# Summary of the model
+summary(logit_sites)
+
+```
+
+Findings:
+
+-   Sites 1-5 have a stronger impact on purchases (coefficient: 0.0329031, p \< 2e-16).
+-   Site 6 is effective but less impactful than Sites 1-5 (coefficient: 0.014387, p \< 9.05e-07).
+
+### Cost & ROI Comparison:
+
+```{r p987}
+total_impressions_1_5 <- sum(data$total_imp_1_5, na.rm = TRUE)
+total_impressions_6 <- sum(data$imp_6, na.rm = TRUE)
+
+cat("\nTotal Impressions for Sites 1-5:", total_impressions_1_5, "\n")
+cat("Total Impressions for Site 6:", total_impressions_6, "\n")
+
+cost_per_1000_1_5 <- 25
+cost_per_1000_6 <- 20
+
+total_cost_1_5 <- (total_impressions_1_5 / 1000) * cost_per_1000_1_5
+total_cost_6 <- (total_impressions_6 / 1000) * cost_per_1000_6
+
+cat("\nTotal Cost for Sites 1-5: $", round(total_cost_1_5, 2), "\n")
+cat("Total Cost for Site 6: $", round(total_cost_6, 2), "\n")
+
+total_conversions_1_5 <- sum(data$purchase[data$total_imp_1_5 > 0], na.rm = TRUE)
+total_conversions_6 <- sum(data$purchase[data$imp_6 > 0], na.rm = TRUE)
+
+cat("\nTotal Conversions for Sites 1-5:", total_conversions_1_5, "\n")
+cat("Total Conversions for Site 6:", total_conversions_6, "\n")
+
+cost_per_conversion_1_5 <- ifelse(total_conversions_1_5 > 0, total_cost_1_5 / total_conversions_1_5, NA)
+cost_per_conversion_6 <- ifelse(total_conversions_6 > 0, total_cost_6 / total_conversions_6, NA)
+
+cat("\nCost per Conversion for Sites 1-5: $", round(cost_per_conversion_1_5, 2), "\n")
+cat("Cost per Conversion for Site 6: $", round(cost_per_conversion_6, 2), "\n")
+
+revenue_per_conversion <- 1200
+
+total_revenue_1_5 <- total_conversions_1_5 * revenue_per_conversion
+total_revenue_6 <- total_conversions_6 * revenue_per_conversion
+
+cat("\nTotal Revenue from Conversions for Sites 1-5: $", total_revenue_1_5, "\n")
+cat("Total Revenue from Conversions for Site 6: $", total_revenue_6, "\n")
+
+roi_1_5 <- ifelse(total_cost_1_5 > 0, (total_revenue_1_5 - total_cost_1_5) / total_cost_1_5, NA)
+roi_6 <- ifelse(total_cost_6 > 0, (total_revenue_6 - total_cost_6) / total_cost_6, NA)
+
+cat("\nROI for Sites 1-5: ", round(roi_1_5 * 100, 2), "%\n")
+cat("ROI for Site 6: ", round(roi_6 * 100, 2), "%\n")
+```
+
+Findings:
+
+-   Site 6 is 66.67% cheaper(CPC) than Sites 1-5. It also has higher ROI.
+-   However, Sites 1-5 drive more total conversions and have higher total revenue.
+-   We would recommend Site 6 as it would give the most returns for the same amount of cost.
+
+## Conclusion and Final Recommendations
+
+This analysis provides a **comprehensive evaluation of Star Digital’s display advertising strategy**. Our findings suggest that **advertising positively impacts conversions**, but its **effectiveness depends on ad frequency and site selection**. The key takeaways from this study include:
+
+- **Ad exposure significantly increases purchase probability, but there are diminishing returns.**  
+- **Site selection plays a crucial role**—Sites 1-5 collectively generate **more total conversions**, but **Site 6 is significantly more cost-efficient**.  
+- **Site 6 offers a lower cost per conversion ($0.14) and the highest ROI (847,906.7%)**, making it the **most efficient option in terms of ad spend.**  
+- **Future experiments should consider refining targeting strategies** to optimize exposure across sites without excessive overlap.  
+
+### **Strategic Recommendations for Star Digital**
+
+Based on these findings, we recommend:
+
+- **Prioritizing Site 6 for advertising** due to **its lower cost per conversion and higher return on investment (ROI).**  
+- **Shifting budget allocation from Sites 1-5 to Site 6**.  
+- **Capping impressions per user** to avoid diminishing returns and optimize ad spending.  
+- **Conducting further experiments** to track **cross-device behavior** and assess if reallocating spend from Sites 1-5 leads to a sustained improvement in overall performance.  
+
+By implementing these insights, Star Digital can **maximize its return on advertising spend, reduce acquisition costs, and refine its long-term digital marketing strategy with confidence.**
+
